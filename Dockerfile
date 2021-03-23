@@ -35,6 +35,7 @@ RUN /usr/glibc-compat/bin/localedef -i zh_CN -f GB18030 zh_CN.GB18030
 RUN /usr/glibc-compat/bin/localedef -i zh_CN -f GBK zh_CN.GBK
 RUN apk add gnu-libiconv --update-cache --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing/ --allow-untrusted
 ENV LD_PRELOAD /usr/lib/preloadable_libiconv.so php
+RUN apk --no-cache add ttf-dejavu fontconfig
 # update
 RUN set -ex \
     # install composer
