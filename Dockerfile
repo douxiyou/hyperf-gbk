@@ -5,7 +5,7 @@
 # @contact  group@hyperf.io
 # @license  https://github.com/hyperf-cloud/hyperf/blob/master/LICENSE
 
-FROM hyperf/hyperf:7.4-alpine-v3.11-swoole
+FROM hyperf/hyperf:8.0-alpine-v3.14-base
 LABEL maintainer="Hyperf Developers <group@hyperf.io>" version="1.0" license="MIT" app.name="Hyperf"
 
 ##
@@ -13,11 +13,14 @@ LABEL maintainer="Hyperf Developers <group@hyperf.io>" version="1.0" license="MI
 ##
 # --build-arg timezone=Asia/Shanghai
 ARG timezone
+ARG SW_VERSION
+ARG COMPOSER_VERSION
 
 ENV TIMEZONE=${timezone:-"Asia/Shanghai"} \
-    COMPOSER_VERSION=1.10.10 \
-    APP_ENV=prod \
-    SCAN_CACHEABLE=(true)
+    SW_VERSION=${SW_VERSION:-"v4.6.7"} \
+    COMPOSER_VERSION=${COMPOSER_VERSION:-"2.0.2"} \
+    SCAN_CACHEABLE=(true) \
+    PHPIZE_DEPS="autoconf dpkg-dev dpkg file g++ gcc libc-dev make php8-dev php8-pear pkgconf re2c pcre-dev pcre2-dev zlib-dev libtool automake"
 
 # Install language pack
 RUN apk --no-cache add ca-certificates wget && \
@@ -39,29 +42,42 @@ RUN apk --no-cache add ttf-dejavu fontconfig
 COPY Songti.ttc /usr/share/fonts/
 # update
 RUN set -ex \
-    # install composer
+    && apk update \
+    # for swoole extension libaio linux-headers
+    && apk add --no-cache libstdc++ openssl git bash \
+    && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS libaio-dev openssl-dev curl-dev \
+    # download
     && cd /tmp \
-    && wget https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar \
-    && chmod u+x composer.phar \
-    && mv composer.phar /usr/local/bin/composer \
-    # show php version and extensions
+    && curl -SL "https://github.com/swoole/swoole-src/archive/${SW_VERSION}.tar.gz" -o swoole.tar.gz \
+    && ls -alh \
+    # php extension:swoole
+    && cd /tmp \
+    && mkdir -p swoole \
+    && tar -xf swoole.tar.gz -C swoole --strip-components=1 \
+    && ln -s /usr/bin/phpize8 /usr/local/bin/phpize \
+    && ln -s /usr/bin/php-config8 /usr/local/bin/php-config \
+    && ( \
+        cd swoole \
+        && phpize \
+        && ./configure --enable-openssl --enable-http2 --enable-swoole-curl --enable-swoole-json \
+        && make -s -j$(nproc) && make install \
+    ) \
+    && echo "memory_limit=2G" > /etc/php8/conf.d/00_default.ini \
+    && echo "opcache.enable_cli = 'On'" >> /etc/php8/conf.d/00_opcache.ini \
+    && echo "extension=swoole.so" > /etc/php8/conf.d/50_swoole.ini \
+    && echo "swoole.use_shortname = 'Off'" >> /etc/php8/conf.d/50_swoole.ini \
+    # install composer
+    && wget -nv -O /usr/local/bin/composer https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar \
+    && chmod u+x /usr/local/bin/composer \
+    # php info
     && php -v \
     && php -m \
     && php --ri swoole \
-    #  ---------- some config ----------
-    && cd /etc/php7 \
-    # - config PHP
-    && { \
-        echo "upload_max_filesize=128M"; \
-        echo "post_max_size=128M"; \
-        echo "memory_limit=1G"; \
-        echo "date.timezone=${TIMEZONE}"; \
-    } | tee conf.d/99_overrides.ini \
-    # - config timezone
-    && ln -sf /usr/share/zoneinfo/${TIMEZONE} /etc/localtime \
-    && echo "${TIMEZONE}" > /etc/timezone \
+    && php --ri Zend\ OPcache \
+    && composer \
     # ---------- clear works ----------
-    && rm -rf /var/cache/apk/* /tmp/* /usr/share/man \
+    && apk del .build-deps \
+    && rm -rf /var/cache/apk/* /tmp/* /usr/share/man /usr/local/bin/php* \
     && echo -e "\033[42;37m Build Completed :).\033[0m\n"
 
 WORKDIR /opt/www
